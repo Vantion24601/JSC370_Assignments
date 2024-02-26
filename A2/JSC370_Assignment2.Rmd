@@ -1,0 +1,491 @@
+---
+title: "JSC370_Assignment2"
+author: "Elaine Dai"
+date: "2024-02-16"
+output: 
+  html_document:
+    theme: flatly
+link-citations: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(message = TRUE)
+```
+
+```{r, message=FALSE}
+library(tidyverse)
+library(stringr)
+library(kableExtra)
+library(stats)
+library(mgcv)
+```
+
+
+
+## Data Wrangling
+
+### 1. Put the life expectancy data in “tidy” format by creating a new column “Sex”. You may want to use pivot_longer function from the tidyr package.
+
+```{r cars, results='hide'}
+alcohol <- read.csv("Alcohol.csv")
+le <- read.csv("life_expectancy.csv")
+```
+
+
+```{r results='hide'}
+le <- le %>%
+  pivot_longer(
+    cols = c(Life.expectancy...Sex..female...Age..at.birth...Variant..estimates, Life.expectancy...Sex..male...Age..at.birth...Variant..estimates),
+    names_to = "Sex",
+    values_to = "Life_Expectancy",
+    names_transform = list(Sex = function(x) str_extract(x, "female|male")),
+    values_drop_na = TRUE
+  ) %>%
+  mutate(Sex = ifelse(Sex == "female", "Female", "Male"))
+head(le)
+```
+
+### 2. Filter the alcohol consumption data to exclude rows with data for “Both sexes”.
+
+```{r results='hide'}
+alcohol <- alcohol %>% filter(Sex != "Both sexes")
+head(alcohol)
+```
+
+### 3. For convenience, you may rename any variables which have complicated names.
+
+
+```{r}
+le <- le %>% rename(Country = Entity, Population_all = Population...Sex..all...Age..all...Variant..estimates)
+head(le)
+```
+
+```{r}
+alcohol <- alcohol %>% 
+  rename(
+    Region_Code = WHO.Region.Code, 
+    Region = WHO.Region,
+    Country_Code = Country.Code,
+    Alcohol_Consumption = Alcohol.total.per.capita..15...consumption.in.liters..numeric.,
+    Low_Est. = Alcohol.total.per.capita..15...consumption.in.liters..low.estimation.,
+    High_Est. = Alcohol.total.per.capita..15...consumption.in.liters..high.estimation.,
+    Alcohol_Consumption_str = Alcohol.total.per.capita..15...consumption.in.liters..string.
+  )
+head(alcohol)
+```
+
+### 4. Merge these datasets by country name and year.
+
+```{r}
+data_merged <- inner_join(alcohol, le, by = c("Country", "Year", "Sex"))
+head(data_merged)
+```
+
+
+
+### 5. Using the kable package, create a summary table showing the mean and sd of life expectancy and alcohol consumption by year, and sex.
+
+```{r}
+summary <- data_merged %>%
+  group_by(Year, Sex) %>%
+  summarise(
+    Mean_Life_Expectancy = mean(Life_Expectancy, na.rm = TRUE),
+    SD_Life_Expectancy = sd(Life_Expectancy, na.rm = TRUE),
+    Mean_Alcohol_Consumption = mean(Alcohol_Consumption, na.rm = TRUE),
+    SD_Alcohol_Consumption = sd(Alcohol_Consumption, na.rm = TRUE),
+    .groups = "drop"
+  )
+kable_output <- kable(summary, "html", 
+                      caption = "Summary of Life Expectancy and Alcohol Consumption by Year and Sex",
+                      position = "right") %>%
+  kable_styling("striped", full_width = F) %>%
+  column_spec(1:2, width = "15em") %>%
+  scroll_box(width = "100%", height = "500px")
+  
+kable_output
+```
+
+
+
+### 6. Create a new categorical variable named “consumption_level” using the alcohol total per capita variable. For female and male separately, calculate the quartiles of alcohol consumption. Categorize consumption level as low (0-q1) medium (q1-q3), and high (q3+). To make sure the variable is rightly coded, create a summary table that contains the minimum total alcohol consumption, maximum alcohol consumption, and number of observations for each category.
+
+```{r}
+quantiles <- data_merged %>% 
+  group_by(Sex) %>%
+  summarise(
+    Q1 = quantile(Alcohol_Consumption, probs = 0.25, na.rm = TRUE),
+    Q3 = quantile(Alcohol_Consumption, probs = 0.75, na.rm = TRUE)
+  )
+quantiles
+```
+
+```{r, results='hide'}
+with_cl <- data_merged %>% 
+  left_join(quantiles, by = "Sex") %>%
+  mutate(consumption_level = case_when(
+    Alcohol_Consumption <= Q1 ~ "low",
+    Alcohol_Consumption > Q1 & Alcohol_Consumption <= Q3 ~ "medium",
+    Alcohol_Consumption > Q3 ~ "high"
+  )) %>%
+  subset(select = -c(Q1, Q3))
+head(with_cl)
+```
+
+```{r}
+with_cl %>%
+  group_by(Sex, consumption_level) %>%
+  summarise(
+    min = min(Alcohol_Consumption, na.rm = TRUE),
+    max = max(Alcohol_Consumption, na.rm = TRUE),
+    counts = n(),
+    .groups = "drop"
+  )
+```
+
+
+
+## Looking at the Data
+
+```{r}
+summary(with_cl)
+```
+
+```{r}
+colSums(is.na(with_cl))
+```
+
+```{r}
+cleaned <- with_cl %>%
+  subset(select = c(Country, Year, Sex, Alcohol_Consumption, Life_Expectancy, consumption_level, Population_all))
+head(cleaned)
+```
+
+
+
+### 1. What is the association between life expectancy and alcohol consumption?
+
+```{r}
+plot(cleaned$Alcohol_Consumption, cleaned$Life_Expectancy, pch=19, cex=0.2,
+     main = "Alcohol Consumption and Life Expectancy",
+     xlab = "Alcohol Consumption(liter)", ylab = "Life Expectancy(year)")
+```
+
+```{r}
+cor(cleaned$Life_Expectancy, cleaned$Alcohol_Consumption)
+```
+
+Life expectancy and alcohol consumption are possitively correlated.
+
+### 2. Does this association differ by Sex?
+
+```{r}
+cleaned %>% 
+  filter(Sex == "Male") %>%
+  ggplot(aes(x = Alcohol_Consumption, y = Life_Expectancy)) +
+  geom_point(shape = 19, size = 0.5) +
+  labs(
+    title = "Alcohol Consumption and Life Expectancy (Males)",
+    x = "Alcohol Consumption (liter)",
+    y = "Life Expectancy (years)"
+  )
+```
+
+```{r}
+cleaned %>% 
+  filter(Sex == "Female") %>%
+  ggplot(aes(x = Alcohol_Consumption, y = Life_Expectancy)) +
+  geom_point(shape = 19, size = 0.5) +
+  labs(
+    title = "Alcohol Consumption and Life Expectancy (Females)",
+    x = "Alcohol Consumption (liter)",
+    y = "Life Expectancy (years)"
+  )
+```
+
+
+```{r}
+cleaned %>% 
+  group_by(Sex) %>%
+  summarise(cor = cor(Life_Expectancy, Alcohol_Consumption))
+```
+The correlation between life expectancy and alcohol consumption differs between males and females. Also, it shows that there is a stronger relationship between alcohol consumption and life expectancy within each sex category compared to the overall population.
+
+### 3. How has life expectancy and alcohol consumption changed over time?
+
+```{r}
+cleaned %>%
+  ggplot(aes(x = Year, y = Life_Expectancy)) +
+  geom_point(shape = 19, size = 0.5) +
+  geom_smooth(method = "lm", se = FALSE, lwd=2, col="red") +
+  labs(title = "Trend in Life Expectancy Over Time", x = "Year", y = "Life Expectancy")
+```
+```{r}
+le_summary <- cleaned %>%
+  group_by(Year) %>%
+  summarise(
+    Mean_Life_Expectancy = mean(Life_Expectancy, na.rm = TRUE),
+    Median_Life_Expectancy = median(Life_Expectancy, na.rm = TRUE),
+    Min_Life_Expectancy = min(Life_Expectancy, na.rm = TRUE),
+    Max_Life_Expectancy = max(Life_Expectancy, na.rm = TRUE),
+    SD_Life_Expectancy = sd(Life_Expectancy, na.rm = TRUE)
+  )
+```
+
+```{r}
+le_summary_long <- pivot_longer(le_summary, cols = -c(Year), names_to = "Statistic")
+
+ggplot(le_summary_long, aes(x = Year, y = value, color = Statistic)) +
+  geom_line() +
+  labs(title = "Summary of Life Expectancy Over Time",
+       x = "Year",
+       y = "Life Expectancy",
+       color = "Statistic",
+       linetype = "Statistic")
+```
+
+
+```{r}
+cleaned %>%
+  ggplot(aes(x = Year, y = Alcohol_Consumption)) +
+  geom_point(shape = 19, size = 0.5) +
+  geom_smooth(method = "lm", se = FALSE, lwd=2, col="red") +
+  labs(title = "Trend in Alcohol Consumption Over Time", x = "Year", y = "Alcohol_Consumption")
+```
+
+```{r}
+ac_summary <- cleaned %>%
+  group_by(Year) %>%
+  summarise(
+    Mean_Alcohol_Consumption = mean(Alcohol_Consumption, na.rm = TRUE),
+    Median_Alcohol_Consumption = median(Alcohol_Consumption, na.rm = TRUE),
+    Min_Alcohol_Consumption = min(Alcohol_Consumption, na.rm = TRUE),
+    Max_Alcohol_Consumption = max(Alcohol_Consumption, na.rm = TRUE),
+    SD_Alcohol_Consumption = sd(Alcohol_Consumption, na.rm = TRUE)
+  )
+```
+
+```{r}
+ac_summary_long <- pivot_longer(ac_summary, cols = -c(Year), names_to = "Statistic")
+
+ggplot(ac_summary_long, aes(x = Year, y = value, color = Statistic)) +
+  geom_line() +
+  labs(title = "Summary of Life Expectancy Over Time",
+       x = "Year",
+       y = "Alcohol_Consumption",
+       color = "Statistic",
+       linetype = "Statistic")
+```
+
+The mean/median/max/min life expectancy all increase over time, but the mean/median/min alcohol consumption remains about the same, only the max alcohol consumption decreases. 
+
+
+## Visualization
+
+### 1. Stacked histogram of alcohol consumption by sex. Use different color schemes and transparancies so you can see both distributions.
+
+```{r}
+ggplot(cleaned, aes(x = Alcohol_Consumption, fill = Sex)) +
+  geom_histogram(position = "stack", alpha = 0.6) +
+  labs(title = "Stacked Histogram of Alcohol Consumption by Sex",
+       x = "Alcohol Consumption",
+       y = "Frequency",
+       fill = "Sex") +
+  scale_fill_manual(values = c("Female" = "blue", "Male" = "red"))
+```
+
+
+
+
+### 2. Facet plot by year for 2000, 2010, and 2019 showing scatterplots with linear regression lines of life expectancy and alcohol consumption
+
+```{r}
+filtered_data <- cleaned %>% filter(Year %in% c(2000, 2010, 2019))
+
+ggplot(filtered_data, aes(x = Alcohol_Consumption, y = Life_Expectancy)) +
+  geom_point(shape = 19, size = 0.5) +
+  geom_smooth(method = "lm", se = FALSE, color = "red") +
+  facet_wrap(~ Year, nrow = 1) +
+  labs(title = "Scatterplots of Life Expectancy and Alcohol Consumption",
+       x = "Alcohol Consumption (liter)",
+       y = "Life Expectancy (year)")
+```
+On each of the three years, life expectancy is expected to increase as alcohol consumotion increases.
+
+### 3. A linear model of life expectancy as a function of time, adjusted for sex. Compare the summary for Canada, and a second country of your choice.
+
+```{r}
+lm_canada <- lm(Life_Expectancy ~ Year + Sex, data = cleaned %>% filter(Country == "Canada"))
+summary(lm_canada)
+```
+```{r}
+lm_australia <- lm(Life_Expectancy ~ Year + Sex, data = cleaned %>% filter(Country == "Australia"))
+summary(lm_australia)
+```
+Both countries show a significant increase in life expectancy over time, while Australia has a slightly higher increasing rate than Canada. The impact of being male on life expectancy is about the same in both countries, which decreases the life expectancy for about 4.5 years compared to females. Both Sex and Year are significant in predicting the life expectancy. The two models have similar r-squared and adjusted r-squared values(Canada has slightly larger values), thus the models are similarly reliable.
+
+### 4. A faceted barplot of male and female life expectancy for the 10 countries with largest discrepancies (between males and females) in 2000 and 2019.
+
+```{r}
+discrepancy <- cleaned %>%
+  filter(Year %in% c(2000, 2019)) %>%
+  select(Country, Year, Sex, Life_Expectancy) %>%
+  pivot_wider(names_from = Sex, values_from = Life_Expectancy) %>%
+  mutate(Discrepancy = abs(Male - Female)) %>%
+  select(Country, Year, Discrepancy)
+head(discrepancy)
+```
+```{r}
+top10_discrepancy <- discrepancy %>%
+  filter(Year %in% c(2000, 2019)) %>%
+  group_by(Year) %>%
+  arrange(desc(Discrepancy)) %>%
+  top_n(10, Discrepancy) %>%
+  arrange(Year, desc(Discrepancy))
+top10_discrepancy
+```
+
+```{r}
+top_data <- cleaned %>%
+  group_by(Country, Year) %>%
+  inner_join(top10_discrepancy, by = c("Country", "Year"))
+top_data
+```
+
+
+```{r}
+ggplot(top_data, aes(x = Country, y = Life_Expectancy, fill = Sex)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  facet_wrap(~Year, nrow = 1, scales = "free_x") +
+  labs(title = "Life Expectancy Discrepancies by Sex in 2000 and 2019",
+       x = "Country",
+       y = "Life Expectancy") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+In all countries with the top 10 largest discrepancies, females have a higher life expectancy than males for both years.
+
+
+
+
+### 5. A boxplot of life expectancy by alcohol consumption level and sex for the year 2019.
+
+
+```{r}
+ggplot(cleaned %>% filter(Year == 2019), aes(x = consumption_level, y = Life_Expectancy, color = Sex)) +
+  geom_boxplot() +
+  labs(title = "Life Expectancy by Alcohol Consumption Level and Sex for 2019",
+       x = "Alcohol Consumption Level",
+       y = "Life Expectancy") 
+```
+
+* For both males and females, the high alcohol consumption level group have the highest median life expectancy, followed by medium alcohol consumption level, and low alcohol consumption level group have the lowest median life expectancy.
+
+* The spread range of life expectancy is similar for low and medium alcohol consumption levels, but high consumption level has a narrower distribution(smaller variation) for both sexes.
+
+* There are outliers in both the "high" and "low" alcohol consumption categories, with lower life expectancy.
+
+* For all consumption levels, females show a higher median life expectancy than males.
+
+
+### 6. Choose a visualization to examine the association life expectancy between males and females with alcohol consumption over time.
+
+```{r}
+ggplot(cleaned, aes(x = Year, y = Life_Expectancy, color = Sex, group = interaction(Sex, consumption_level))) +
+  geom_line() +
+  facet_wrap(~consumption_level) +
+  labs(title = "Life Expectancy Over Time by Alcohol Consumption Level and Sex",
+       x = "Year",
+       y = "Life Expectancy",
+       color = "Sex") +
+  theme(legend.position = "bottom")
+```
+
+
+
+
+## Advanced Regression
+
+Construct a multiple linear regression model to examine the association between life expectancy and alcohol consumption level adjusted for population, year, and sex. Note you may want to scale population since the values are so large. First use population as a linear predictor variable, and then fit another model where you put a cubic regression spline on population.
+
+
+```{r}
+scaled <- cleaned %>% mutate(Scaled_Population = scale(Population_all))
+lm <- lm(Life_Expectancy ~ Alcohol_Consumption + Scaled_Population + Year + Sex, data = scaled)
+gam <- gam(Life_Expectancy ~ Alcohol_Consumption + s(Scaled_Population, bs = "cr") + Year + Sex, data = scaled)
+```
+
+
+### 1. Provide summaries of your models, including overall model fit and interpretation of the parameter estimates (linear and non-linear).
+
+
+```{r}
+summary(lm)
+```
+
+Coefficients:
+*  Intercept: 
+
+The intercept is the estimated life expectancy with no alcohol consumption, zero 
+
+
+```{r}
+summary(gam)
+```
+
+
+### 2. Plot the smooth (gam) model and interpret.
+
+```{r}
+plot(gam)
+```
+
+
+### 3. Take the average alcohol consumption and life expectancy by country and sex (i.e. remove time). Re-run the same two regressions (except without year), summarize and interpret.
+
+```{r}
+average_data <- scaled %>%
+  group_by(Country, Sex) %>%
+  summarise(Average_AC = mean(Alcohol_Consumption, na.rm = TRUE),
+            Average_LE = mean(Life_Expectancy, na.rm = TRUE),
+            Average_SP = mean(Scaled_Population, na.rm = TRUE),
+            .groups = "drop")
+head(average_data)
+```
+
+
+```{r}
+lm_avg <- lm(Average_LE ~ Average_AC + Average_SP + Sex, data = average_data)
+gam_avg <- gam(Average_LE ~ Average_AC + s(Average_SP, bs = "cr") + Sex, data = average_data)
+
+summary(lm_avg)
+```
+```{r}
+summary(gam_avg)
+```
+
+
+### 4. Make a plot average alcohol consumption and life expectancy and color by sex. Add a linear regression line and a smooth regression line.
+
+```{r}
+ggplot(average_data, aes(x = Average_AC, y = Average_LE, color = Sex)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE) +
+  geom_smooth(method = "gam", formula = y ~ s(x, bs = "cs"), se = FALSE) +
+  labs(title = "Average Life Expectancy vs. Average Alcohol Consumption",
+       x = "Average Alcohol Consumption",
+       y = "Average Life Expectancy")
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
