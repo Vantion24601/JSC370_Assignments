@@ -1,0 +1,107 @@
+---
+title: "midterm"
+output: html_document
+author: "Elaine Dai"
+date: "2024-03-10"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+In the rapidly evolving job market, the role of a Data Analyst has emerged as a pivotal position within companies.
+
+
+# Methods
+
+The dataset utilized in this analysis was acquired from Kaggle, specifically from the "LinkedIn Job Postings" dataset by user Arsh Kon [here ](https://www.kaggle.com/datasets/arshkon/linkedin-job-postings/data). This dataset comprises a wide range of United States job postings on LinkedIn in 2023, including various fields such as job title, company, location, salary, and more.
+
+Some columns that are deemed relevant to the topic are:
+- job_id: Job ID as defined by LinkedIn
+- company_id
+- title:
+- description:
+- max_salary:
+- med_salary:
+- min_salary:
+- pay_period:
+- formatted_work_type:
+- location:
+- formatted_experience_level:
+
+#Preliminary Results
+
+
+```{r warning=FALSE, message=FALSE}
+library(dplyr)
+library(tidyverse)
+library(ggplot2)
+```
+
+```{r}
+jobs <- read.csv("job_postings.csv")
+```
+
+
+Upon acquiring the dataset, I first examined the structure of the data: the types of each column and any missing values. The target attribute is the salary, so this preliminary examination is focused mainly on salary. The examination revealed that salary information was provided either in a range format (minimum and maximum salary) or a median value (med_salary), and not all entries had a valid salary. To address this, a new column, salary, was created by averaging the min_salary and max_salary values for each entry where med_salary was missing. Another modification involved multiplying 2087(the average number of work hours in a year) to the hourly based salary, in order to convert salary information from an hourly to a yearly basis for those entries listed with hourly rates.
+
+The furthur cleaning entailed filtering the dataset to retain only those job postings that are directly related to data roles. This was achieved by keeping rows where the job title included the term "data". And the final stage is removing all job postings with na value and  selecting specific columns that were deemed relevant for the analysis.
+
+
+
+```{r echo=FALSE, results='hide'}
+colSums(is.na(jobs))
+```
+
+```{r}
+cleaned_jobs <- jobs |>
+  mutate(salary = ifelse(is.na(med_salary), (max_salary + min_salary) / 2, med_salary)) |>
+  filter(!is.na(salary)) |>
+  filter(str_detect(title, regex("data", ignore_case = TRUE))) |>
+  mutate(salary = ifelse(pay_period == "HOURLY", salary * 2087, salary)) |>
+  select(job_id, company_id, title, description, salary, pay_period, formatted_work_type, location, formatted_experience_level)
+```
+
+```{r}
+colSums(is.na(cleaned_jobs))
+cleaned_jobs
+```
+
+
+
+
+
+```{r}
+df |> summarise(n = n())
+colSums(is.na(df))
+```
+
+
+```{r}
+df %>% filter()
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
