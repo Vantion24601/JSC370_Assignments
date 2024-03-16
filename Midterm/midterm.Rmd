@@ -65,7 +65,7 @@ library(tm)
 jobs <- read.csv("job_postings.csv")
 ```
 
-##### data cleaning and wrangling
+##### Data Cleaning and Wrangling
 
 Upon acquiring the dataset, I examined the structure of the data: the types of each column and any missing values. The target attribute is the salary, so this preliminary examination is focused mainly on salary. The examination revealed that salary information was provided either in a range format (minimum and maximum salary) or a median value (med_salary), and not all entries had a valid salary. To address this, a new column, salary, was created by averaging the min_salary and max_salary values for each entry where med_salary was missing. 2087(the average number of work hours in a year) is multiplied to the hourly based salary, in order to convert salary information from an hourly to a yearly basis for those entries listed with hourly rates. Another modification involved extracting the state information from the column location, for future analysis.
 
@@ -102,17 +102,17 @@ colSums(is.na(cleaned_data))
 cleaned_data
 ```
 
-##### summary statistics: salary
+##### Summary Statistics: salary
 
 I extracted the summary statistics for salary and formulated the table using the kable.
 To further explore the categorical variables within the dataset, I implemented a visualization function using the ggplot2 library. The function was designed to produce two types of visual representations for each categorical variable: a bar plot and a box plot.
 
 
-##### exploratory graphs: word type, state, experience level
+##### Exploratory Graphs: word type, state, experience level
 
 The function first groups the data by the categorical variable provided, summarises the data to get counts of each category within the variable, and then creates a barplot using ggplot2 with categories on the y-axis (due to coord_flip()) and their respective counts on the x-axis. Then a boxplot is created with the categorical variable on the y-axis (again, due to coord_flip()) and salary on the x-axis. The boxes are colored based on the categorical variable to differentiate between categories visually.
 
-##### text mining: description
+##### Text Mining: description
 
 Finally, an additional analysis was incorporated by utilizing text mining techniques to dissect job descriptions. The tidytext package was used to tokenize the text, allowing for the identification and visualization of the most frequent tokens. Common stopwords were removed, including universally frequent English words and additional terms like "years", "will", "work", "job" and "role".etc which are expected to be recurrent in job descriptions but offer little analytical value. Additionally, any tokens containing numbers were filtered out to focus purely on textual data. The text data was then tokenized into bigrams and trigrams to facilitate a granular analysis of phrase patterns within the job descriptions. Word/phrase count bar plots and a word cloud were created for visualization.
 
