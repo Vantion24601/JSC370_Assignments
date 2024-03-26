@@ -1,0 +1,387 @@
+---
+title: "JSC370_Assignment3"
+author: "Elaine Dai"
+date: "2024-03-20"
+output: html_document
+always_allow_html: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# APIs (Part 1)
+
+The aim is to get more practice working with APIs. We will use and API maintained by NASA for retrieving information about near earth objects (NEOs), asteroids that pass close to Earth. The documentation is available at https://api.nasa.gov/ (scroll down to the API titled Asteroids NeoWs). First you will need an API key for accessing the service. You can get one at https://api.nasa.gov/ where you will need to supply an email address, which can be either your UofT email or a personal email address.
+
+```{r message=FALSE}
+library(httr)
+library(kableExtra)
+library(ggplot2)
+library(tidyverse)
+library(dplyr)
+library(webshot2)
+```
+
+## 1 
+
+Use start_date and end_date along with the API key to submit an HTTP GET request to the NASA NeoWs Feed API. Pick a range of a few days.
+
+```{r}
+response <- GET(
+  url   = "https://api.nasa.gov/neo/rest/v1/feed?",
+  query = list(start_date = "2024-03-01",
+               end_date = "2024-03-08",
+               api_key = "nC63KBeJdJyBBdFJF09bJ0CrUMERWeRR8szcai3G")
+)
+```
+
+```{r}
+neo <- httr::content(response)
+```
+
+
+## 2 
+
+There should be 3 elements in your retrieved query: a list of urls, the number of near earth objects that had their nearest approach during the time spanned by start_date and end_date, and an object whose attributes are the dates (represented by strings of the form YYYY-MM-DD) in the time spanned by start_date and end_date. Each such date attribute has an array of values, each of which represents a near Earth object. Summarize how many near earth objects you retrieved and some of the parameters that are available for them.
+
+```{r}
+neo$element_count
+```
+
+I retrived 145 NEOs, and some available parameters are id, name, absolute magnitude, estimated diameter, is_potentially_hazardous_asteroid, close approach data, and is_sentry_object.
+
+
+## 3 
+
+Extract information on estimated_diameter, is_potentially_hazardous_asteroid, and relative_velocity, and create a table with this information for all of the NEOs pulled in your date range.
+
+
+```{r}
+neos <- data.frame(
+  date = character(),
+  name = character(),
+  estimated_diameter_min_km = numeric(),
+  estimated_diameter_max_km = numeric(),
+  is_potentially_hazardous_asteroid = logical(),
+  relative_velocity_kmph = numeric(),
+  stringsAsFactors = FALSE
+)
+```
+
+
+```{r}
+# Loop through each date in the near_earth_objects
+for (date in names(neo$near_earth_objects)) {
+  for (neo_object in neo$near_earth_objects[[date]]) {
+    date <- date
+    name <- neo_object$name
+    ed_min_km <- neo_object$estimated_diameter$kilometers$estimated_diameter_min
+    ed_max_km <- neo_object$estimated_diameter$kilometers$estimated_diameter_max
+    is_potentially_ha <- neo_object$is_potentially_hazardous_asteroid
+    relative_velocity_kmps <- as.numeric(neo_object$close_approach_data[[1]]$relative_velocity$kilometers_per_second)
+    
+    # Combine the extracted information into a single row
+    neo_row <- data.frame(
+      date,
+      name,
+      ed_min_km,
+      ed_max_km,
+      is_potentially_ha,
+      relative_velocity_kmps,
+      stringsAsFactors = FALSE
+    )
+    
+    neos <- rbind(neos, neo_row)
+  }
+}
+```
+
+
+```{r}
+kable_output <- kable(neos, "html")
+kable_output <- kable_styling(kable_output, "striped", full_width = F)
+kable_output <- scroll_box(kable_output, width = "100%", height = "500px")
+kable_output
+```
+
+
+
+## 4 
+
+Explore how the number of near Earth objects per day changes from day to day. Is this number correlated from one day to the next?
+
+```{r}
+daily_counts <- sapply(neo$near_earth_objects, length)
+daily_counts <- data.frame(Date = as.Date(names(daily_counts)), Count = daily_counts, row.names = NULL)
+daily_counts
+```
+
+
+```{r}
+daily_counts |>
+  ggplot(aes(x = Date, y = Count)) +
+  geom_line() +
+  geom_point() +
+  theme_minimal() +
+  labs(title = "Daily Counts of NEOs",
+       x = "Date",
+       y = "Count")
+```
+
+
+```{r}
+cor.test(daily_counts$Count[-7], daily_counts$Count[-1])
+```
+
+The number of NEOs is likely not strongly correlated from one day to the next, as the correlation coefficient is only -0.06, and the p-value is 0.8943 > 0.05. 
+
+
+# 5 
+
+Explore associations between the three variables extracted in 3.
+
+
+```{r}
+neos_longer <- neos |>
+  pivot_longer(cols = starts_with("ed"),
+               names_to = "Diameter_Type",
+               values_to = "Diameter_km")
+
+neos_longer |>
+  ggplot(aes(x = is_potentially_ha, y = Diameter_km, fill = Diameter_Type)) +
+  geom_boxplot() +
+  scale_fill_manual(values = c("blue", "red")) +
+  labs(title = "Boxplot of Estimated Diameters by Hazardous Status",
+       x = "Is Potentially Hazardous",
+       y = "Estimated Diameter (km)",
+       fill = "Diameter Type") +
+  theme_minimal()
+```
+
+
+
+```{r}
+# Boxplot for Relative Velocity vs Hazardous Status
+neos |>
+  ggplot(aes(x = is_potentially_ha, y = relative_velocity_kmps)) +
+  geom_boxplot() +
+  labs(title = "Boxplot of Relative Velocity by Hazardous Status",
+       x = "Is Potentially Hazardous",
+       y = "Relative Velocity (km/s)")
+```
+
+```{r}
+neos_longer |>
+  ggplot(aes(x = relative_velocity_kmps, 
+             y = Diameter_km, 
+             group = Diameter_Type, 
+             color = Diameter_Type)) +
+  geom_line() +
+  scale_color_manual(values = c("blue", "red")) +
+  labs(title = "Estimated Diameter vs. Relative Velocity",
+       x = "Relative Velocity (km/h)",
+       y = "Estimated Diameter (km)",
+       color = "Diameter Type") +
+  theme_minimal()
+```
+
+
+
+
+
+```{r}
+# Correlation between Estimated Diameter and Relative Velocity
+cor.test(neos$ed_min_km, neos$relative_velocity_kmps)
+```
+```{r}
+cor.test(neos$ed_max_km, neos$relative_velocity_kmps)
+```
+
+
+The box plots suggest that potentially hazardous objects tend to have larger estimated diameters compared to non-hazardous objects, and the median relative velocity appears to be higher for the potentially hazardous objects. 
+
+Both minimum and maximum estimated diameters appear to have some form of relationship with relative velocity, indicated by the trend in the lines, although this relationship does not appear to be very strong.
+
+The correlation test between estimated diameter and relative velocity has resulted in a Pearson correlation coefficient of 0.359, with a p-value < 0.001. This suggests that there is a positive but moderate correlation between the estimated diameter and relative velocity.
+
+
+
+
+# Text Mining (Part 2)
+The Consumer Financial Protection Bureau maintains a database of customer complaints. We will use text mining to see if there are any trends in the reported consumer’s narrative description of the issue/complaint. The data can be acquired here: https://www.consumerfinance.gov/data-research/consumer-complaints/.
+
+```{r message=FALSE}
+library(tidytext)
+library(tm)
+```
+
+
+## 1
+
+Using data.table (the file is very large), subset the data to include only the last 2 years (use Date received). Summarize the dataset dimensions and variables. Bonus points if you use the API to acquire the data!
+
+I am using the data in last year only.
+
+```{r}
+response2 <- GET(
+  url   = "https://www.consumerfinance.gov/data-research/consumer-complaints/search/api/v1/?",
+  query = list(date_received_min = "2023-03-21",
+               date_received_max = "2024-03-21",
+               format = "csv",
+               has_narrative = "true",
+               no_aggs = "true")
+)
+```
+
+```{r}
+content_data <- httr::content(response2, "text", encoding = "UTF-8")
+```
+
+```{r}
+complaints <- read.csv(textConnection(content_data), stringsAsFactors = FALSE)
+```
+
+```{r}
+dim(complaints)
+```
+
+```{r}
+names(complaints)
+```
+
+
+
+## 2 
+
+Tokenize the complaints (consumer complaint narrative) and count the number of each token. Do you see anything interesting? Does removing stop words change what tokens appear as the most frequent? What are the 5 most common tokens for the complaints after removing stopwords?
+
+
+```{r}
+tokens <- complaints |>
+  select(Narrative = Consumer.complaint.narrative, Issue) |>
+  unnest_tokens(word, Narrative)
+```
+
+
+```{r}
+tokens |>
+  count(word, sort = TRUE) |>
+  slice_max(order_by = n, n = 10)
+```
+
+The most frequent tokens are all stop words or words that makes no sense.
+
+```{r}
+tokens_no_sw <- tokens |>
+  filter(!word %in% stopwords("english"),
+         !str_detect(word, "^x+$"),
+         !grepl("[[:digit:]]+", word))
+
+tokens_no_sw |>
+  count(word, sort = TRUE) |>
+  slice_max(order_by = n, n = 10)
+```
+Removing the stop words changes the most frequent tokens. 
+The 5 most common tokens for the complaints after removing stopwords and words containing only "x" or numeric values are: credit, account, information, consumer and report.
+
+## 3 
+
+Tokenize the complaints into bigrams. Find the 10 most common bigrams and visualize them with ggplot2.
+
+```{r}
+tokens_bigram_count <- complaints |>
+  select(Narrative = Consumer.complaint.narrative, Issue) |>
+  unnest_tokens(ngram, Narrative, token = "ngrams", n = 2) |>
+  count(ngram, sort = TRUE)
+```
+
+```{r}
+tokens_bigram_count |> slice_max(order_by = n, n = 10)
+```
+
+```{r}
+tokens_bigram_count |> 
+  slice_max(order_by = n, n = 10) |>
+  ggplot(aes(reorder(ngram, n), y = n)) +
+  labs(y = "Count", x = "Bigram") +
+  geom_bar(stat = "identity") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+
+After filtering out all the bigrams that contains stop words or words only with "x", the new words with top 10 frequencies are:
+
+
+```{r}
+sw_start <- paste0("^", paste(stopwords("english"), collapse=" |^"), "$")
+sw_end <- paste0("", paste(stopwords("english"), collapse="$| "), "$")
+```
+
+
+```{r}
+# Filter out bigrams containing any stop word or strings with only 'x'
+filtered_tokens_bigram <- tokens_bigram_count |>
+  filter(!grepl(sw_start, ngram, ignore.case = TRUE),
+         !grepl(sw_end, ngram, ignore.case = TRUE),
+         !grepl("\\bx+\\b", ngram, ignore.case = TRUE))
+```
+
+```{r}
+filtered_tokens_bigram |> 
+  slice_max(order_by = n, n = 10) |>
+  ggplot(aes(reorder(ngram, n), y = n)) +
+  labs(y = "Count", x = "Bigram") +
+  geom_bar(stat = "identity") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+
+## 4 
+
+Calculate the TF-IDF value for the complaints in the top 3 issues. Here, the issue is like the document. What are the 5 tokens from each issue with the highest TF-IDF value? How are the results different from the answers you got in question 1?
+
+```{r message=FALSE}
+top_issues <- complaints |>
+  count(Issue, sort = TRUE) |>
+  top_n(3) |>
+  pull(Issue)
+top_issues
+```
+
+
+```{r}
+tf_idf_values <- tokens_no_sw |>
+  count(Issue, word) |>
+  bind_tf_idf(word, Issue, n) |>
+  arrange(desc(tf_idf))
+head(tf_idf_values)
+```
+
+```{r}
+top_tokens_per_issue <- tf_idf_values |>
+  filter(Issue %in% top_issues) |>
+  group_by(Issue) |>
+  top_n(5, tf_idf) |>
+  ungroup() |>
+  arrange(Issue, desc(tf_idf))
+```
+
+```{r}
+top_tokens_per_issue |> select(Issue, word)
+```
+
+
+The top 5 tokens with the highest TF-IDF values are different from the 5 most common tokens in general. These words with high TF-IDF values are not the most frequent in the corpus but have a high significance in specific issues. 
+
+
+
+
+
+
+
+
+
+
+
+
